@@ -13,10 +13,12 @@ from datetime import datetime, timedelta
 
 from airflow import DAG
 
-                                          # Airflow 3 (and 2.x with the standard provider)
-from airflow.providers.standard.operators.bash import BashOperator
-from airflow.providers.standard.sensors.python import PythonSensor
-
+try:                                            # Airflow 3 (and 2.x with the standard provider)
+    from airflow.providers.standard.operators.bash import BashOperator
+    from airflow.providers.standard.sensors.python import PythonSensor
+except ImportError:                             # Airflow 2.9 (the Docker image)
+    from airflow.operators.bash import BashOperator
+    from airflow.sensors.python import PythonSensor
 
 PROJECT = "/opt/airflow/project"
 DATA = "/data"                                  # Docker named volume (see docker-compose.yml)
