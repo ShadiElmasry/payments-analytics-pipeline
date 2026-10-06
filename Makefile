@@ -37,7 +37,7 @@ test:  ## Unit tests (data generator + Spark cleaning logic)
 	pytest -q
 
 lint:  ## Lint the Python code
-	ruff check src tests dags
+	ruff check src tests dags scripts
 
 docs:  ## Build dbt docs (lineage graph) and serve them
 	cd dbt_project && dbt docs generate && dbt docs serve

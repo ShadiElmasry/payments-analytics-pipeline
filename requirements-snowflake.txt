@@ -1,0 +1,7 @@
+# Extra packages for Snowflake mode:
+#   pip install -r requirements.txt -r requirements-snowflake.txt
+# Snowflake's Spark connector 3.2 supports Spark 4.0 and 4.1 (not 4.2 yet), so PySpark is capped here.
+pyspark>=4.0,<4.2
+dbt-snowflake>=1.10
+snowflake-connector-python[pandas]>=3.12
+cryptography>=42

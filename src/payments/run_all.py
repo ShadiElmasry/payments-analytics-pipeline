@@ -2,6 +2,7 @@
 
     python -m payments.run_all              # 92 days of data
     python -m payments.run_all --days 14    # smaller and faster
+    python -m payments.run_all --target snowflake   # same pipeline on Snowflake (see README)
 
 Steps: generate data -> Spark clean -> dbt build (models + tests) -> train fraud model -> charts/exports.
 Works the same on Windows, macOS, Linux and inside Docker.
@@ -13,6 +14,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+from payments.envfile import load_env_file
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,12 +29,28 @@ def dbt_executable() -> str:
     return "dbt"
 
 
+def check_snowflake_settings(env: dict) -> None:
+    """Fail early, with a clear message, if the Snowflake settings are missing."""
+    required = ("SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PRIVATE_KEY_PATH")
+    missing = [k for k in required if not env.get(k)]
+    if missing:
+        raise SystemExit(f"Missing {', '.join(missing)}. Copy .env.example to .env and fill it in.")
+    key_path = env["SNOWFLAKE_PRIVATE_KEY_PATH"]
+    if not Path(key_path).exists():
+        raise SystemExit(f"Private key not found: {key_path} (create it with scripts/make_snowflake_keys.py)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=92)
+    parser.add_argument("--target", choices=["duckdb", "snowflake"], default="duckdb")
     args = parser.parse_args()
 
+    load_env_file()                      # reads .env (Snowflake settings) if it exists
     env = os.environ.copy()
+    env["DBT_TARGET"] = args.target      # dbt, the model and the report all follow this
+    if args.target == "snowflake":
+        check_snowflake_settings(env)
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT / "src"), env.get("PYTHONPATH")]))
     env.setdefault("RAW_PATH", str(ROOT / "data" / "raw"))
     env.setdefault("LAKE_PATH", str(ROOT / "data" / "lake"))
@@ -40,9 +59,12 @@ def main() -> None:
     Path(env["DUCKDB_PATH"]).parent.mkdir(parents=True, exist_ok=True)
 
     py = sys.executable
+    sink = "snowflake" if args.target == "snowflake" else "parquet"
+    sink_label = "Snowflake RAW" if sink == "snowflake" else "Parquet"
     steps = [
         ("1/5 generate data", [py, "-m", "payments.generate_data", "--days", str(args.days)], ROOT),
-        ("2/5 Spark: clean -> Parquet", [py, "-m", "payments.spark_clean", "--all"], ROOT),
+        (f"2/5 Spark: clean -> {sink_label}",
+         [py, "-m", "payments.spark_clean", "--all", "--sink", sink], ROOT),
         ("3/5 dbt: build models + run tests", [dbt_executable(), "build"], ROOT / "dbt_project"),
         ("4/5 train fraud model", [py, "-m", "payments.train_fraud_model"], ROOT),
         ("5/5 charts + CSV exports", [py, "-m", "payments.report"], ROOT),

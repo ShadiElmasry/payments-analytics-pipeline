@@ -10,13 +10,8 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.models.baseoperator import chain  # type: ignore[import-not-found]
-from airflow.operators.bash import BashOperator  # type: ignore[import-not-found]
-
-try:
-    from airflow.sensors.python import PythonSensor  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - fallback for Airflow versions that expose the sensor here.
-    from airflow.sensors.python_sensor import PythonSensor  # type: ignore[import-not-found]
+from airflow.operators.bash import BashOperator
+from airflow.sensors.python import PythonSensor
 
 PROJECT = "/opt/airflow/project"
 DATA = "/data"                                  # Docker named volume (see docker-compose.yml)
@@ -76,5 +71,5 @@ with DAG(
     train_fraud_model = bash("train_fraud_model", f"{PY} -m payments.train_fraud_model")
     build_report = bash("build_report", f"{PY} -m payments.report")
 
-    chain(wait_for_file, spark_clean, dbt_seed, dbt_run, dbt_test,
-          train_fraud_model, build_report)
+    (wait_for_file >> spark_clean >> dbt_seed >> dbt_run >> dbt_test
+     >> train_fraud_model >> build_report)

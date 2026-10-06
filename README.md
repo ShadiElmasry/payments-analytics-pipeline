@@ -156,6 +156,8 @@ src/payments/
   train_fraud_model.py        time-split training, review-budget metrics, scores written back
   report.py                   charts for this README + CSV exports of the marts for BI tools
   run_all.py                  one-command runner (no make needed): works on Windows, Linux, macOS, Docker
+  warehouse.py, envfile.py    read/write helpers for DuckDB or Snowflake, and a small .env loader
+scripts/make_snowflake_keys.py  creates the key pair for Snowflake login
 dbt_project/
   models/staging/             stg_transactions, stg_customers, stg_merchants
   models/marts/               fct_transactions, dim_*, mart_daily_kpis, mart_merchant_performance,
@@ -164,7 +166,7 @@ dbt_project/
   tests/                      3 business-rule tests (+ 24 schema tests in models/schema.yml)
 tests/                        pytest: data generator + Spark cleaning rules
 .github/workflows/ci.yml      lint, unit tests, full pipeline on every push
-warehouse/snowflake_setup.sql optional Snowflake objects
+warehouse/snowflake_setup.sql Snowflake warehouse, schemas, role and service user
 ```
 
 ## Data model
@@ -205,22 +207,45 @@ every currency must have an FX rate, fraud may only appear on approved payments,
 
 ## Snowflake mode (experimental, not covered by CI)
 
-The models are written to run on Snowflake as well. Create the objects with `warehouse/snowflake_setup.sql`,
-copy `.env.example` to `.env`, then load raw data with Spark's Snowflake connector and build with dbt:
+The same pipeline can run on Snowflake: Spark loads cleaned data into `RAW`, dbt builds `STAGING` and `MARTS`, and the
+model and report read from and write to Snowflake. DuckDB stays the default. This path needs your own Snowflake account.
+
+Snowflake is phasing out single-factor password logins, so the pipeline signs in with a **key pair** as a service user.
 
 ```bash
-export DBT_TARGET=snowflake            # plus the SNOWFLAKE_* variables
-# add the spark-snowflake + snowflake-jdbc jars that match your Spark/Scala version (Spark 4 = Scala 2.13)
-python -m payments.spark_clean --all --sink snowflake
-cd dbt_project && dbt build
+# 1. Install the extras (this caps PySpark at 4.1, the newest version Snowflake's connector 3.2 supports)
+pip install -r requirements.txt -r requirements-snowflake.txt
+
+# 2. Create a key pair: the private key goes to ~/.snowflake/, the public key is printed
+python scripts/make_snowflake_keys.py
+
+# 3. In a Snowsight worksheet, run warehouse/snowflake_setup.sql after pasting the public key into it.
+#    It creates the warehouse, database, schemas, a role and a service user.
+
+# 4. Copy .env.example to .env and fill in your account identifier and the private key path.
+
+# 5. Run everything on Snowflake
+python -m payments.run_all --target snowflake --days 14
 ```
 
-Check that a Snowflake connector release supports your Spark version; if not, pin `pyspark<4` (Python 3.12 or older). The model training step currently reads from DuckDB only.
+Check the result in Snowsight:
+
+```sql
+USE ROLE PAYMENTS_ROLE; USE WAREHOUSE PAYMENTS_WH;
+SELECT * FROM PAYMENTS_DB.MARTS.MART_DAILY_KPIS ORDER BY TXN_DATE DESC LIMIT 5;
+SELECT * FROM PAYMENTS_DB.MARTS.FRAUD_SCORES ORDER BY FRAUD_SCORE DESC LIMIT 10;
+```
+
+Notes:
+- The first run downloads Snowflake's Spark connector jars from Maven Central (needs internet and Java 17+).
+- Re-running appends to `RAW.TRANSACTIONS`; dbt keeps the newest copy of each transaction, so results do not double.
+- The warehouse suspends after 60 seconds idle. When you are done, the clean-up SQL at the bottom of `snowflake_setup.sql` removes everything.
+- Docker is set up for the DuckDB mode only.
 
 ## Limitations and roadmap
 
 - [ ] Incremental dbt models (currently full rebuild each run)
-- [ ] Snowflake mode in CI and model training against Snowflake via Snowpark
+- [ ] Snowflake mode in CI (needs a Snowflake service user stored as a repository secret)
 - [ ] Power BI dashboard on top of the marts (CSV exports in `exports/` after `make report`)
 - [ ] Model registry and drift monitoring; scheduled retraining DAG
 - [ ] Streaming variant with Spark Structured Streaming

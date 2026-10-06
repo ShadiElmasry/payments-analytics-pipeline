@@ -16,6 +16,7 @@ spark-warehouse/
 metastore_db/
 derby.log
 
-# local editor and dbt files
-.vscode/
-dbt_project/.user.yml
+# never commit keys or secrets
+*.p8
+*.pem
+.snowflake/

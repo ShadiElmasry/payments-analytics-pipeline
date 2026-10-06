@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
-import duckdb
 import matplotlib
 
 matplotlib.use("Agg")  # no display needed (works in CI)
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
+
+from payments.envfile import load_env_file  # noqa: E402
+from payments.warehouse import read_sql  # noqa: E402
 
 IMG = Path("docs/images")
 BLUE, ORANGE, GREY = "#2f6fdb", "#e8743b", "#8a8f98"
@@ -25,10 +26,12 @@ def style(ax, title: str) -> None:
 def main() -> None:
     IMG.mkdir(parents=True, exist_ok=True)
     Path("exports").mkdir(exist_ok=True)
-    con = duckdb.connect(os.environ.get("DUCKDB_PATH", "data/warehouse.duckdb"), read_only=True)
+    load_env_file()
 
     # 1) Daily GMV with a 7-day average
-    kpi = con.execute("select * from marts.mart_daily_kpis order by txn_date").df()
+    kpi = read_sql("select * from marts.mart_daily_kpis order by txn_date")
+    kpi["txn_date"] = pd.to_datetime(kpi["txn_date"])
+    kpi["gmv_usd"] = kpi["gmv_usd"].astype(float)
     kpi["gmv_7d"] = kpi["gmv_usd"].rolling(7, min_periods=1).mean()
     fig, ax = plt.subplots(figsize=(9, 3.6))
     ax.bar(kpi["txn_date"], kpi["gmv_usd"] / 1e3, color=BLUE, alpha=0.35, width=0.9, label="Daily")
@@ -41,11 +44,12 @@ def main() -> None:
     plt.close(fig)
 
     # 2) Fraud rate by merchant category
-    cat = con.execute("""
+    cat = read_sql("""
         select category, avg(is_fraud) * 100 as fraud_rate_pct
         from marts.fct_transactions where status = 'APPROVED'
         group by category order by fraud_rate_pct
-    """).df()
+    """)
+    cat["fraud_rate_pct"] = cat["fraud_rate_pct"].astype(float)
     fig, ax = plt.subplots(figsize=(9, 3.8))
     ax.barh(cat["category"], cat["fraud_rate_pct"], color=ORANGE)
     ax.set_xlabel("Fraud rate on approved transactions (%)")
@@ -87,10 +91,9 @@ def main() -> None:
     # CSV exports so Power BI / Qlik / Excel can load the marts without a database driver
     for table in ["mart_daily_kpis", "mart_merchant_performance", "fct_transactions", "fraud_scores"]:
         try:
-            con.execute(f"select * from marts.{table}").df().to_csv(f"exports/{table}.csv", index=False)
-        except duckdb.CatalogException:
-            pass
-    con.close()
+            read_sql(f"select * from marts.{table}").to_csv(f"exports/{table}.csv", index=False)
+        except Exception as error:  # a table may not exist yet (e.g. fraud_scores before training)
+            print(f"skipped export of {table}: {type(error).__name__}")
     print("charts -> docs/images/ | CSV exports -> exports/")
 
 

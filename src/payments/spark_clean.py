@@ -12,25 +12,36 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from payments.envfile import load_env_file
 
-def get_spark(app_name: str = "payments_clean") -> SparkSession:
+# Jars Spark downloads from Maven Central on first use in Snowflake mode.
+# Connector 3.2 supports Spark 4.0/4.1 (Scala 2.13) and needs Snowflake JDBC 4.0.2 or newer.
+# Override with the SPARK_SNOWFLAKE_PACKAGES environment variable.
+SNOWFLAKE_PACKAGES = "net.snowflake:spark-snowflake_2.13:3.2.2,net.snowflake:snowflake-jdbc:4.0.2"
+
+
+def get_spark(app_name: str = "payments_clean", snowflake: bool = False) -> SparkSession:
     # Make Spark's worker processes use the SAME Python as this script. Without this, Spark may start
     # "python3" from PATH (a different version, or the Microsoft Store stub on Windows) and fail.
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
-    return (
+    builder = (
         SparkSession.builder.master("local[*]")
         .appName(app_name)
         .config("spark.sql.ansi.enabled", "false")                        # bad values -> NULL (Spark 3 and 4)
         .config("spark.sql.shuffle.partitions", "4")                      # small data: few partitions
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic")    # re-runs replace only that day
         .config("spark.ui.showConsoleProgress", "false")
-        .getOrCreate()
     )
+    if snowflake:
+        packages = os.environ.get("SPARK_SNOWFLAKE_PACKAGES", SNOWFLAKE_PACKAGES)
+        builder = builder.config("spark.jars.packages", packages)
+    return builder.getOrCreate()
 
 
 def clean_transactions(df: DataFrame) -> DataFrame:
@@ -73,18 +84,28 @@ def clean_merchants(df: DataFrame) -> DataFrame:
     )
 
 
-def write_snowflake(df: DataFrame, table: str, mode: str) -> None:
-    """Experimental: needs the spark-snowflake + snowflake-jdbc jars (see README)."""
-    options = {
+def private_key_body(path: str) -> str:
+    """The Spark connector wants the key as one line, without the BEGIN/END header and footer lines."""
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    return "".join(line.strip() for line in lines if line.strip() and not line.startswith("-----"))
+
+
+def snowflake_options() -> dict[str, str]:
+    """Connection settings for the Spark connector (key-pair login, values come from .env)."""
+    return {
         "sfURL": f"{os.environ['SNOWFLAKE_ACCOUNT']}.snowflakecomputing.com",
         "sfUser": os.environ["SNOWFLAKE_USER"],
-        "sfPassword": os.environ["SNOWFLAKE_PASSWORD"],
-        "sfRole": os.environ.get("SNOWFLAKE_ROLE", "SYSADMIN"),
-        "sfDatabase": os.environ["SNOWFLAKE_DATABASE"],
-        "sfWarehouse": os.environ["SNOWFLAKE_WAREHOUSE"],
+        "pem_private_key": private_key_body(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"]),
+        "sfRole": os.environ.get("SNOWFLAKE_ROLE", "PAYMENTS_ROLE"),
+        "sfDatabase": os.environ.get("SNOWFLAKE_DATABASE", "PAYMENTS_DB"),
+        "sfWarehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "PAYMENTS_WH"),
         "sfSchema": "RAW",
     }
-    (df.write.format("net.snowflake.spark.snowflake").options(**options)
+
+
+def write_snowflake(df: DataFrame, table: str, mode: str) -> None:
+    """Experimental: write a DataFrame into the Snowflake RAW schema through the Spark connector."""
+    (df.write.format("net.snowflake.spark.snowflake").options(**snowflake_options())
        .option("dbtable", table).mode(mode).save())
 
 
@@ -98,7 +119,8 @@ def main() -> None:
     parser.add_argument("--sink", choices=["parquet", "snowflake"], default="parquet")
     args = parser.parse_args()
 
-    spark = get_spark()
+    load_env_file()
+    spark = get_spark(snowflake=args.sink == "snowflake")
     spark.sparkContext.setLogLevel("ERROR")
 
     pattern = "*" if args.all else args.date

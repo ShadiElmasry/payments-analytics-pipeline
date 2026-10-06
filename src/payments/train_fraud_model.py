@@ -10,11 +10,9 @@ Design choices worth knowing:
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-import duckdb
 import joblib
 import numpy as np
 import pandas as pd
@@ -24,6 +22,9 @@ from sklearn.inspection import permutation_importance
 from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+
+from payments.envfile import load_env_file
+from payments.warehouse import read_sql, write_table
 
 NUMERIC = [
     "amount_usd", "amount_vs_avg_ratio", "cust_prior_txn_count", "txns_today_so_far",
@@ -47,9 +48,8 @@ def review_budget_metrics(y: np.ndarray, score: np.ndarray, amount: np.ndarray, 
 
 
 def main() -> None:
-    db_path = os.environ.get("DUCKDB_PATH", "data/warehouse.duckdb")
-    con = duckdb.connect(db_path)
-    df = con.execute("select * from marts.mart_fraud_features order by txn_ts").df()
+    load_env_file()
+    df = read_sql("select * from marts.mart_fraud_features order by txn_ts")
     # Newer DuckDB/pandas return nullable ints; sklearn wants plain floats (NaN = missing)
     df[NUMERIC] = df[NUMERIC].astype("float64")
 
@@ -115,11 +115,7 @@ def main() -> None:
         "split": np.where(df["txn_ts"] <= cutoff, "train", "test"),
         "scored_at": datetime.now(timezone.utc).replace(tzinfo=None),
     })
-    # pandas 3 uses a new string dtype that older DuckDB versions cannot read; plain objects are safe
-    scores = scores.astype({"txn_id": object, "split": object})
-    con.register("scores_df", scores)
-    con.execute("create or replace table marts.fraud_scores as select * from scores_df")
-    con.close()
+    write_table(scores, "marts", "fraud_scores")
 
     top1 = metrics["review_budget"][0]
     print(f"ROC-AUC {metrics['roc_auc']:.3f} | PR-AUC {metrics['pr_auc']:.3f} "
