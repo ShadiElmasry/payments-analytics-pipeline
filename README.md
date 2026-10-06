@@ -254,5 +254,6 @@ Notes:
 
 ## Author
 
-**Shady El Masry**, Data Analyst moving into analytics and data engineering.
-[LinkedIn](https://www.linkedin.com/in/shady-elmasry1999) · [GitHub](https://github.com/ShadiElmasry)
+**Shady El Masry**, Analytics Engineer.
+[LinkedIn](www.linkedin.com/in/shadyyelmasryy)
+ · [GitHub](https://github.com/ShadiElmasry)
