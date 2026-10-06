@@ -51,7 +51,7 @@ flowchart LR
 | Orchestration | **Airflow** | Schedule, order, retry, alert. Contains no business logic. |
 | Ingestion / cleaning | **PySpark 4** | Type casting, text normalisation, dedupe, partitioned Parquet |
 | Transformation | **dbt** | Staging, fact and dimensions, KPI marts, ML features, 27 tests |
-| Warehouse | **DuckDB** (default), **Snowflake** (experimental) | Storage and SQL compute |
+| Warehouse | **DuckDB** (default), **Snowflake** | Storage and SQL compute |
 | ML | **scikit-learn** | Fraud scoring, written back to the warehouse |
 | Quality / CI | **pytest, ruff, GitHub Actions** | Unit tests, lint, full pipeline run on every push |
 
@@ -205,10 +205,11 @@ every currency must have an FX rate, fraud may only appear on approved payments,
   copy of any transaction id, so re-running a day never double-counts.
 - **Staging as tables.** DuckDB views over Parquet would store a file path; tables keep the project relocatable.
 
-## Snowflake mode (experimental, not covered by CI)
+## Snowflake mode
 
-The same pipeline can run on Snowflake: Spark cleans the data, the Python connector bulk-loads it into `RAW`, dbt builds `STAGING` and `MARTS`, and the
-model and report read from and write to Snowflake. DuckDB stays the default. This path needs your own Snowflake account.
+The same pipeline runs on Snowflake: Spark cleans the data, the Python connector bulk-loads it into `RAW`, dbt builds
+`STAGING` and `MARTS`, and the model and report read from and write to Snowflake. DuckDB stays the default.
+This path needs your own Snowflake account. It was tested end to end on a Snowflake trial account and is not covered by CI.
 
 Snowflake is phasing out single-factor password logins, so the pipeline signs in with a **key pair** as a service user.
 
@@ -236,9 +237,11 @@ SELECT * FROM PAYMENTS_DB.MARTS.MART_DAILY_KPIS ORDER BY TXN_DATE DESC LIMIT 5;
 SELECT * FROM PAYMENTS_DB.MARTS.FRAUD_SCORES ORDER BY FRAUD_SCORE DESC LIMIT 10;
 ```
 
+![Snowflake marts](docs/images/snowflake_marts.png)
+
 Notes:
 - Spark hands its cleaned data to pandas and `write_pandas` loads it (Parquet upload + `COPY INTO`). At this data
-  size that is much faster than the spark-snowflake connector and needs no extra jars.
+  size that is simpler than the spark-snowflake connector and needs no extra jars.
 - Re-running appends to `RAW.TRANSACTIONS`; dbt keeps the newest copy of each transaction, so results do not double.
 - The warehouse suspends after 60 seconds idle. When you are done, the clean-up SQL at the bottom of `snowflake_setup.sql` removes everything.
 - Airflow in Docker can run on Snowflake too: put `DBT_TARGET=snowflake` in `.env`, then `docker compose up -d --build`.
@@ -254,6 +257,5 @@ Notes:
 
 ## Author
 
-**Shady El Masry**, Analytics Engineer.
-[LinkedIn](www.linkedin.com/in/shadyyelmasryy)
- · [GitHub](https://github.com/ShadiElmasry)
+**Shady El Masry**, Data Analyst moving into analytics and data engineering.
+[LinkedIn](https://www.linkedin.com/in/shadyyelmasryy) · [GitHub](https://github.com/ShadiElmasry)
