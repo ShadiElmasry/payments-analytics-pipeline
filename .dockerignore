@@ -1,0 +1,12 @@
+.git
+.venv
+data
+exports
+models
+logs
+dbt_project/target
+dbt_project/logs
+**/__pycache__
+.pytest_cache
+.ruff_cache
+spark-warehouse

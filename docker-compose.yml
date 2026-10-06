@@ -1,0 +1,22 @@
+# Local Airflow for demos (SQLite + one container). Use Postgres + CeleryExecutor in production.
+services:
+  airflow:
+    build: .
+    command: standalone                      # webserver + scheduler in one container
+    user: "${AIRFLOW_UID:-50000}:0"          # on Linux, run `export AIRFLOW_UID=$(id -u)` first
+    ports:
+      - "8080:8080"                          # http://localhost:8080
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      PYTHONPATH: /opt/airflow/project/src
+      RAW_PATH: /data/raw
+      LAKE_PATH: /data/lake
+      DUCKDB_PATH: /data/warehouse.duckdb
+      DBT_PROFILES_DIR: /opt/airflow/project/dbt_project
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - .:/opt/airflow/project               # the repo: code in, charts/exports/reports out
+      - payments_data:/data                  # raw files, Parquet lake and DuckDB live here (fast, no Windows file-lock issues)
+
+volumes:
+  payments_data:

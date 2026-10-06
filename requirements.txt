@@ -1,0 +1,11 @@
+# Tested on Python 3.14 (pyspark 4.2, duckdb 1.5, dbt-core 1.12, dbt-duckdb 1.11, pandas 3, scikit-learn 1.9).
+# Spark 4 needs Java 17 or newer.
+pyspark>=4.0
+duckdb>=1.4
+dbt-core>=1.10
+dbt-duckdb>=1.10
+pandas>=2.1
+numpy>=1.26
+scikit-learn>=1.4
+matplotlib>=3.8
+joblib>=1.3

@@ -1,0 +1,21 @@
+# data & build outputs (regenerate with `make demo`)
+data/
+exports/
+models/
+dbt_project/target/
+dbt_project/logs/
+dbt_project/dbt_packages/
+logs/
+.env
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# local editor and dbt files
+.vscode/
+dbt_project/.user.yml

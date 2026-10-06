@@ -1,0 +1,23 @@
+name: payments
+version: "1.0.0"
+config-version: 2
+profile: payments
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  payments:
+    staging:
+      +schema: staging
+      +materialized: table   # tables (not views): DuckDB views over Parquet would store a file path
+    marts:
+      +schema: marts
+      +materialized: table
+
+seeds:
+  payments:
+    +schema: staging

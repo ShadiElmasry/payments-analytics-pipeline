@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - uses: actions/setup-java@v4      # Spark needs Java
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - run: make setup
+      - run: make lint
+      - run: make test
+
+      # Full pipeline on a smaller dataset: generate -> Spark -> dbt build (incl. tests) -> ML -> report
+      - run: make demo DAYS=21
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-reports-${{ matrix.python-version }}
+          path: |
+            reports/
+            docs/images/
