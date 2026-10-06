@@ -207,13 +207,13 @@ every currency must have an FX rate, fraud may only appear on approved payments,
 
 ## Snowflake mode (experimental, not covered by CI)
 
-The same pipeline can run on Snowflake: Spark loads cleaned data into `RAW`, dbt builds `STAGING` and `MARTS`, and the
+The same pipeline can run on Snowflake: Spark cleans the data, the Python connector bulk-loads it into `RAW`, dbt builds `STAGING` and `MARTS`, and the
 model and report read from and write to Snowflake. DuckDB stays the default. This path needs your own Snowflake account.
 
 Snowflake is phasing out single-factor password logins, so the pipeline signs in with a **key pair** as a service user.
 
 ```bash
-# 1. Install the extras (this caps PySpark at 4.1, the newest version Snowflake's connector 3.2 supports)
+# 1. Install the extras (dbt-snowflake and the Python connector)
 pip install -r requirements.txt -r requirements-snowflake.txt
 
 # 2. Create a key pair: the private key goes to ~/.snowflake/, the public key is printed
@@ -237,10 +237,12 @@ SELECT * FROM PAYMENTS_DB.MARTS.FRAUD_SCORES ORDER BY FRAUD_SCORE DESC LIMIT 10;
 ```
 
 Notes:
-- The first run downloads Snowflake's Spark connector jars from Maven Central (needs internet and Java 17+).
+- Spark hands its cleaned data to pandas and `write_pandas` loads it (Parquet upload + `COPY INTO`). At this data
+  size that is much faster than the spark-snowflake connector and needs no extra jars.
 - Re-running appends to `RAW.TRANSACTIONS`; dbt keeps the newest copy of each transaction, so results do not double.
 - The warehouse suspends after 60 seconds idle. When you are done, the clean-up SQL at the bottom of `snowflake_setup.sql` removes everything.
-- Docker is set up for the DuckDB mode only.
+- Airflow in Docker can run on Snowflake too: put `DBT_TARGET=snowflake` in `.env`, then `docker compose up -d --build`.
+  The container reads the other settings from `.env` and your key from `~/.snowflake/` (mounted read-only at `/opt/snowflake-keys`).
 
 ## Limitations and roadmap
 

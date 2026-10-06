@@ -54,19 +54,24 @@ def read_sql(sql: str) -> pd.DataFrame:
     return df
 
 
+def write_snowflake_table(df: pd.DataFrame, schema: str, table: str, overwrite: bool = True) -> None:
+    """Bulk-load a DataFrame into Snowflake (Parquet upload + COPY INTO); creates the table if needed."""
+    from snowflake.connector.pandas_tools import write_pandas
+
+    conn = snowflake_connection(schema.upper())
+    try:
+        out = df.copy()
+        out.columns = [c.upper() for c in out.columns]
+        write_pandas(conn, out, table.upper(), auto_create_table=True, overwrite=overwrite,
+                     use_logical_type=True)
+    finally:
+        conn.close()
+
+
 def write_table(df: pd.DataFrame, schema: str, table: str) -> None:
     """Create or replace schema.table from a DataFrame."""
     if is_snowflake():
-        from snowflake.connector.pandas_tools import write_pandas
-
-        conn = snowflake_connection(schema.upper())
-        try:
-            out = df.copy()
-            out.columns = [c.upper() for c in out.columns]
-            write_pandas(conn, out, table.upper(), auto_create_table=True, overwrite=True,
-                         use_logical_type=True)
-        finally:
-            conn.close()
+        write_snowflake_table(df, schema, table)
     else:
         import duckdb
 

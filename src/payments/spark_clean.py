@@ -1,7 +1,7 @@
 """PySpark step: clean raw CSV files and write a partitioned Parquet "lake".
 
 Default (local) sink : Parquet files in data/lake/  (read later by dbt + DuckDB)
-Experimental sink    : Snowflake RAW schema via the spark-snowflake connector
+Experimental sink    : Snowflake RAW schema (Spark cleans, then the Python connector bulk-loads)
 
 Usage:
   python -m payments.spark_clean --all               # every daily file
@@ -12,20 +12,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from payments.envfile import load_env_file
 
-# Jars Spark downloads from Maven Central on first use in Snowflake mode.
-# Connector 3.2 supports Spark 4.0/4.1 (Scala 2.13) and needs Snowflake JDBC 4.0.2 or newer.
-# Override with the SPARK_SNOWFLAKE_PACKAGES environment variable.
-SNOWFLAKE_PACKAGES = "net.snowflake:spark-snowflake_2.13:3.2.2,net.snowflake:snowflake-jdbc:4.0.2"
-
-
-def get_spark(app_name: str = "payments_clean", snowflake: bool = False) -> SparkSession:
+def get_spark(app_name: str = "payments_clean") -> SparkSession:
     # Make Spark's worker processes use the SAME Python as this script. Without this, Spark may start
     # "python3" from PATH (a different version, or the Microsoft Store stub on Windows) and fail.
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
@@ -37,10 +30,8 @@ def get_spark(app_name: str = "payments_clean", snowflake: bool = False) -> Spar
         .config("spark.sql.shuffle.partitions", "4")                      # small data: few partitions
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic")    # re-runs replace only that day
         .config("spark.ui.showConsoleProgress", "false")
+        .config("spark.sql.execution.arrow.pyspark.enabled", "true")      # fast toPandas() for the Snowflake sink
     )
-    if snowflake:
-        packages = os.environ.get("SPARK_SNOWFLAKE_PACKAGES", SNOWFLAKE_PACKAGES)
-        builder = builder.config("spark.jars.packages", packages)
     return builder.getOrCreate()
 
 
@@ -84,29 +75,16 @@ def clean_merchants(df: DataFrame) -> DataFrame:
     )
 
 
-def private_key_body(path: str) -> str:
-    """The Spark connector wants the key as one line, without the BEGIN/END header and footer lines."""
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
-    return "".join(line.strip() for line in lines if line.strip() and not line.startswith("-----"))
+def write_snowflake(df: DataFrame, table: str, overwrite: bool) -> None:
+    """Experimental: load a DataFrame into the Snowflake RAW schema.
 
+    The data is small (a few hundred thousand rows), so collecting it to pandas and bulk-loading with the
+    Python connector (one Parquet upload + COPY INTO) is much faster than the spark-snowflake connector,
+    and needs no extra jars from Maven.
+    """
+    from payments.warehouse import write_snowflake_table
 
-def snowflake_options() -> dict[str, str]:
-    """Connection settings for the Spark connector (key-pair login, values come from .env)."""
-    return {
-        "sfURL": f"{os.environ['SNOWFLAKE_ACCOUNT']}.snowflakecomputing.com",
-        "sfUser": os.environ["SNOWFLAKE_USER"],
-        "pem_private_key": private_key_body(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"]),
-        "sfRole": os.environ.get("SNOWFLAKE_ROLE", "PAYMENTS_ROLE"),
-        "sfDatabase": os.environ.get("SNOWFLAKE_DATABASE", "PAYMENTS_DB"),
-        "sfWarehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "PAYMENTS_WH"),
-        "sfSchema": "RAW",
-    }
-
-
-def write_snowflake(df: DataFrame, table: str, mode: str) -> None:
-    """Experimental: write a DataFrame into the Snowflake RAW schema through the Spark connector."""
-    (df.write.format("net.snowflake.spark.snowflake").options(**snowflake_options())
-       .option("dbtable", table).mode(mode).save())
+    write_snowflake_table(df.toPandas(), "RAW", table, overwrite=overwrite)
 
 
 def main() -> None:
@@ -120,7 +98,7 @@ def main() -> None:
     args = parser.parse_args()
 
     load_env_file()
-    spark = get_spark(snowflake=args.sink == "snowflake")
+    spark = get_spark()
     spark.sparkContext.setLogLevel("ERROR")
 
     pattern = "*" if args.all else args.date
@@ -144,9 +122,9 @@ def main() -> None:
         merchants.coalesce(1).write.mode("overwrite").parquet(f"{args.lake}/merchants")
         print(f"wrote Parquet lake to {args.lake}/")
     else:
-        write_snowflake(txns, "TRANSACTIONS", "append")   # dbt de-duplicates re-runs
-        write_snowflake(customers, "CUSTOMERS", "overwrite")
-        write_snowflake(merchants, "MERCHANTS", "overwrite")
+        write_snowflake(txns, "TRANSACTIONS", overwrite=False)   # append; dbt de-duplicates re-runs
+        write_snowflake(customers, "CUSTOMERS", overwrite=True)
+        write_snowflake(merchants, "MERCHANTS", overwrite=True)
         print("loaded RAW.TRANSACTIONS / CUSTOMERS / MERCHANTS in Snowflake")
 
     spark.stop()

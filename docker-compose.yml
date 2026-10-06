@@ -6,6 +6,9 @@ services:
     user: "${AIRFLOW_UID:-50000}:0"          # on Linux, run `export AIRFLOW_UID=$(id -u)` first
     ports:
       - "8080:8080"                          # http://localhost:8080
+    env_file:
+      - path: .env                           # Snowflake settings (optional; DuckDB mode needs none)
+        required: false
     environment:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       PYTHONPATH: /opt/airflow/project/src
@@ -13,10 +16,14 @@ services:
       LAKE_PATH: /data/lake
       DUCKDB_PATH: /data/warehouse.duckdb
       DBT_PROFILES_DIR: /opt/airflow/project/dbt_project
+      DBT_TARGET: ${DBT_TARGET:-duckdb}      # set DBT_TARGET=snowflake in .env to run the DAG on Snowflake
+      SNOWFLAKE_PRIVATE_KEY_PATH: /opt/snowflake-keys/payments_rsa_key.p8   # the key, as seen inside the container
     volumes:
       - ./dags:/opt/airflow/dags
       - .:/opt/airflow/project               # the repo: code in, charts/exports/reports out
       - payments_data:/data                  # raw files, Parquet lake and DuckDB live here (fast, no Windows file-lock issues)
+      - ~/.snowflake:/opt/snowflake-keys:ro    # Snowflake private key (read-only, never copied into the image;
+                                               # not mounted at ~/.snowflake so the connector ignores connections.toml there)
 
 volumes:
   payments_data:

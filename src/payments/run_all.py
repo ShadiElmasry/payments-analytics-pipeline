@@ -20,13 +20,17 @@ from payments.envfile import load_env_file
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def dbt_executable() -> str:
-    """dbt installed next to this Python (same virtual env), with a .exe on Windows."""
-    bin_dir = Path(sys.executable).parent
-    for name in ("dbt", "dbt.exe"):
-        if (bin_dir / name).exists():
-            return str(bin_dir / name)
-    return "dbt"
+def dbt_command() -> list[str]:
+    """Run the dbt-core installed in THIS Python, never a different `dbt` found on PATH.
+
+    (Some machines also have dbt's newer "Fusion" program on PATH, installed by the VS Code dbt extension.
+    This project is built and tested on dbt-core, so we call it through Python directly.)
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("dbt.cli.main") is None:
+        raise SystemExit("dbt-core is not installed in this Python. Run: pip install -r requirements.txt")
+    return [sys.executable, "-c", "from dbt.cli.main import cli; cli()"]
 
 
 def check_snowflake_settings(env: dict) -> None:
@@ -65,7 +69,7 @@ def main() -> None:
         ("1/5 generate data", [py, "-m", "payments.generate_data", "--days", str(args.days)], ROOT),
         (f"2/5 Spark: clean -> {sink_label}",
          [py, "-m", "payments.spark_clean", "--all", "--sink", sink], ROOT),
-        ("3/5 dbt: build models + run tests", [dbt_executable(), "build"], ROOT / "dbt_project"),
+        ("3/5 dbt: build models + run tests", [*dbt_command(), "build"], ROOT / "dbt_project"),
         ("4/5 train fraud model", [py, "-m", "payments.train_fraud_model"], ROOT),
         ("5/5 charts + CSV exports", [py, "-m", "payments.report"], ROOT),
     ]

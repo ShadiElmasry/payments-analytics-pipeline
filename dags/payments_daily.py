@@ -1,7 +1,9 @@
-"""payments_daily: raw CSV -> Spark -> Parquet lake -> dbt (build + test) -> fraud model -> report.
+"""payments_daily: raw CSV -> Spark -> Parquet lake (or Snowflake RAW) -> dbt (build + test) -> fraud model -> report.
 
 This file only says WHAT runs, in WHAT ORDER, and WHEN. The real work lives in
 src/payments (Spark, ML) and dbt_project (SQL models + tests).
+
+Warehouse: DuckDB by default. Set DBT_TARGET=snowflake in .env (and restart the container) to run on Snowflake.
 
 Try a backfill (generated data covers 2026-07-01 .. 2026-09-30):
   airflow dags backfill -s 2026-09-28 -e 2026-09-30 payments_daily
@@ -10,14 +12,20 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.operators.bash import BashOperator
-from airflow.sensors.python import PythonSensor
+
+                                          # Airflow 3 (and 2.x with the standard provider)
+from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.standard.sensors.python import PythonSensor
+
 
 PROJECT = "/opt/airflow/project"
 DATA = "/data"                                  # Docker named volume (see docker-compose.yml)
 PY = "/home/airflow/venv/bin/python"            # the virtual env that holds Spark, dbt, DuckDB, sklearn
 DBT = "/home/airflow/venv/bin/dbt"
+TARGET = os.environ.get("DBT_TARGET", "duckdb").lower()           # duckdb | snowflake
+SINK = "snowflake" if TARGET == "snowflake" else "parquet"
 ENV = {
+    "DBT_TARGET": TARGET,                       # dbt, the model and the report all follow this
     "PYTHONPATH": f"{PROJECT}/src",
     "RAW_PATH": f"{DATA}/raw",
     "LAKE_PATH": f"{DATA}/lake",
@@ -53,8 +61,8 @@ with DAG(
     end_date=datetime(2026, 9, 30),      # the demo data stops here
     schedule="@daily",
     catchup=False,
-    max_active_runs=1,                   # DuckDB allows one writer at a time
-    tags=["payments", "spark", "dbt", "ml"],
+    max_active_runs=1,                   # DuckDB allows one writer; on Snowflake, dbt rebuilds the same tables
+    tags=["payments", "spark", "dbt", "ml", TARGET],
 ) as dag:
 
     wait_for_file = PythonSensor(
@@ -64,7 +72,7 @@ with DAG(
         timeout=60 * 60,
         mode="reschedule",
     )
-    spark_clean = bash("spark_clean", f"{PY} -m payments.spark_clean --date {{{{ ds }}}}")
+    spark_clean = bash("spark_clean", f"{PY} -m payments.spark_clean --date {{{{ ds }}}} --sink {SINK}")
     dbt_seed = bash("dbt_seed", f"cd dbt_project && {DBT} seed")
     dbt_run = bash("dbt_run", f"cd dbt_project && {DBT} run")
     dbt_test = bash("dbt_test", f"cd dbt_project && {DBT} test")   # failure here blocks ML

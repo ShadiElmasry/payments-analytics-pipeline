@@ -2,27 +2,27 @@
   "train_rows": 205967,
   "test_rows": 88272,
   "test_fraud_rate": 0.020130958854449883,
-  "roc_auc": 0.8920760656939095,
-  "pr_auc": 0.3666918162778118,
+  "roc_auc": 0.8922756472012346,
+  "pr_auc": 0.3651777950820753,
   "pr_auc_baseline": 0.020130958854449883,
   "review_budget": [
     {
       "reviewed_share": 0.01,
-      "precision": 0.5589569160997733,
-      "fraud_count_recall": 0.27743387732132807,
-      "fraud_value_recall": 0.5552889777997477
+      "precision": 0.5510204081632653,
+      "fraud_count_recall": 0.2734946539110861,
+      "fraud_value_recall": 0.5482584982759787
     },
     {
       "reviewed_share": 0.02,
-      "precision": 0.4056657223796034,
-      "fraud_count_recall": 0.40292628024760835,
-      "fraud_value_recall": 0.6316048506636813
+      "precision": 0.40226628895184136,
+      "fraud_count_recall": 0.3995498030388295,
+      "fraud_value_recall": 0.6286248198041574
     },
     {
       "reviewed_share": 0.05,
-      "precision": 0.23272150464536595,
-      "fraud_count_recall": 0.5779403489026449,
-      "fraud_value_recall": 0.8115289830427515
+      "precision": 0.2313618853387718,
+      "fraud_count_recall": 0.574563871693866,
+      "fraud_value_recall": 0.8118520204002084
     }
   ]
 }

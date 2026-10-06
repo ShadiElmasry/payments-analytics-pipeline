@@ -8,8 +8,8 @@ RUN apt-get update \
  && mkdir -p /data && chown airflow:0 /data && chmod -R g+rwX /data
 
 USER airflow
-# ONE virtual env with everything the pipeline needs (Spark, dbt, DuckDB, scikit-learn).
+# ONE virtual env with everything the pipeline needs (Spark, dbt, DuckDB, scikit-learn, Snowflake extras).
 # It is separate from Airflow's own Python, so their dependencies can never clash.
-COPY requirements.txt /tmp/requirements.txt
+COPY requirements.txt requirements-snowflake.txt /tmp/
 RUN python -m venv /home/airflow/venv \
- && /home/airflow/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
+ && /home/airflow/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt -r /tmp/requirements-snowflake.txt
